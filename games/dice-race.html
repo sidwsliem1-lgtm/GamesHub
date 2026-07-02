@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>سباق النرد</title>
+<link rel="stylesheet" href="../style.css">
+<script src="../confetti.js"></script>
+<style>
+  .track{ display:flex;flex-direction:column;gap:10px;margin-bottom:18px; }
+  .track-row{display:flex;align-items:center;gap:10px;}
+  .track-label{width:70px;font-size:13px;color:var(--text-muted);flex:none;text-align:left;}
+  .track-bar{
+    flex:1;height:26px;background:#0F0C09;border-radius:99px;position:relative;overflow:hidden;
+    box-shadow: inset 0 3px 6px rgba(0,0,0,0.5);
+  }
+  .track-fill{ height:100%;border-radius:99px;transition:width .4s ease; }
+  .track-fill.p1{background:linear-gradient(90deg, var(--brass), var(--brass-bright));}
+  .track-fill.p2{background:linear-gradient(90deg, var(--copper), #D88C4B);}
+  .track-token{ position:absolute;top:50%;transform:translateY(-50%);font-size:16px;transition:right .4s ease; }
+  .die-wrap{ margin:20px 0; }
+  .finish-flag{font-size:13px;color:var(--text-muted);text-align:center;margin-top:-8px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">🎲 لاعبان</div>
+    <h1>سباق <span>النرد</span></h1>
+    <p>أول من يصل للمربع 30 يفوز</p>
+  </header>
+  <a class="small-link" href="../index.html" style="margin-bottom:14px;display:block;">→ العودة لصندوق الألعاب</a>
+
+  <div class="instructions">
+    <strong>كيف تُلعب؟</strong>
+    <ol>
+      <li>بالتناوب، كل لاعب يضغط "ارمِ النرد" ويتقدّم بعدد النقاط الظاهرة.</li>
+      <li>إذا رميت الرقم 6، تحصل على دور إضافي فوراً!</li>
+      <li>أول لاعب يصل أو يتجاوز المربع 30 يفوز بالسباق.</li>
+    </ol>
+  </div>
+
+  <div id="app"></div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="../multiplayer.js"></script>
+<script>
+const FINISH = 30;
+// pip layout per face value (row,col) on a 3x3 grid, 1-indexed cells
+const PIPS = {
+  1: [5],
+  2: [1,9],
+  3: [1,5,9],
+  4: [1,3,7,9],
+  5: [1,3,5,7,9],
+  6: [1,3,4,6,7,9],
+};
+
+let state = {
+  setupDone: false,
+  playerNames: {p1:'اللاعب الأول', p2:'اللاعب الثاني'},
+  positions: {p1:0, p2:0},
+  turn: 'p1',
+  lastRoll: null,
+  winner: null,
+  rolling: false,
+};
+
+let myRole = null;
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function initGame(n1, n2){
+  state.playerNames.p1 = n1;
+  state.playerNames.p2 = n2;
+  state.positions = {p1:0, p2:0};
+  state.turn = 'p1'; state.lastRoll = null; state.winner = null; state.rolling = false;
+  state.setupDone = true;
+  render();
+}
+
+function startGame(){
+  const n1 = document.getElementById('p1Input')?.value.trim() || state.playerNames.p1;
+  const n2 = document.getElementById('p2Input')?.value.trim() || state.playerNames.p2;
+  initGame(n1, n2);
+}
+
+function rollDice(){
+  if(state.winner || state.rolling) return;
+  state.rolling = true;
+  render();
+  if(window.MP) MP.sync();
+  let ticks = 0;
+  const interval = setInterval(() => {
+    state.lastRoll = 1 + Math.floor(Math.random()*6);
+    render();
+    if(window.MP) MP.sync();
+    ticks++;
+    if(ticks >= 6){
+      clearInterval(interval);
+      finalizeRoll();
+    }
+  }, 90);
+}
+
+function finalizeRoll(){
+  const roll = state.lastRoll;
+  state.positions[state.turn] = Math.min(FINISH, state.positions[state.turn] + roll);
+  state.rolling = false;
+  if(state.positions[state.turn] >= FINISH){
+    state.winner = state.turn;
+  } else if(roll !== 6){
+    state.turn = state.turn === 'p1' ? 'p2' : 'p1';
+  }
+  render();
+  if(window.MP) MP.sync();
+}
+
+function newRace(){
+  state.positions = {p1:0, p2:0};
+  state.turn = 'p1'; state.lastRoll = null; state.winner = null;
+  render();
+}
+
+function backToSetup(){
+  state = {
+    setupDone:false, playerNames: state.playerNames, positions:{p1:0,p2:0},
+    turn:'p1', lastRoll:null, winner:null, rolling:false
+  };
+  render();
+}
+
+function renderSetup(){
+  return `
+  <div class="card">
+    <h2>أسماء اللاعبين</h2>
+    <label>اللاعب الأول</label>
+    <input type="text" id="p1Input" placeholder="اللاعب الأول" value="${escapeHtml(state.playerNames.p1)}">
+    <label>اللاعب الثاني</label>
+    <input type="text" id="p2Input" placeholder="اللاعب الثاني" value="${escapeHtml(state.playerNames.p2)}">
+    <button class="btn-primary" onclick="startGame()">ابدأ السباق 🏁</button>
+  </div>
+  `;
+}
+
+function trackRow(role, emoji){
+  const pct = Math.min(100, (state.positions[role] / FINISH) * 100);
+  return `
+  <div class="track-row">
+    <div class="track-label">${escapeHtml(state.playerNames[role])}</div>
+    <div class="track-bar">
+      <div class="track-fill ${role}" style="width:${pct}%;"></div>
+      <div class="track-token" style="right:calc(${pct}% - 10px);">${emoji}</div>
+    </div>
+  </div>
+  `;
+}
+
+function dieFace(value){
+  const active = PIPS[value] || [];
+  let pips = '';
+  for(let i=1;i<=9;i++){
+    pips += `<div class="die-pip" style="opacity:${active.includes(i)?1:0};"></div>`;
+  }
+  return `<div class="pip-grid">${pips}</div>`;
+}
+
+function renderDie(){
+  // simple rotation transform based on current roll value, for visual variety while "rolling"
+  const v = state.lastRoll || 1;
+  const rot = {1:'rotateY(0deg)',2:'rotateY(-90deg)',3:'rotateX(-90deg)',4:'rotateX(90deg)',5:'rotateY(90deg)',6:'rotateY(180deg)'}[v];
+  return `
+  <div class="die-scene die-wrap">
+    <div class="die-cube" style="transform:${state.rolling ? 'rotateX(720deg) rotateY(540deg)' : rot};">
+      <div class="die-face die-face-front">${dieFace(1)}</div>
+      <div class="die-face die-face-back">${dieFace(6)}</div>
+      <div class="die-face die-face-right">${dieFace(2)}</div>
+      <div class="die-face die-face-left">${dieFace(5)}</div>
+      <div class="die-face die-face-top">${dieFace(3)}</div>
+      <div class="die-face die-face-bottom">${dieFace(4)}</div>
+    </div>
+  </div>
+  `;
+}
+
+function renderGame(){
+  if(state.winner){
+    return `
+    <div class="card">
+      <div class="finished-trophy">🏆</div>
+      <div class="finished-title">${escapeHtml(state.playerNames[state.winner])} يفوز بالسباق!</div>
+      <div class="finished-sub">وصل إلى خط النهاية أولاً</div>
+      <button class="btn-primary" onclick="newRace()">سباق جديد 🔁</button>
+    </div>
+    <div class="small-link" onclick="backToSetup()">تعديل الأسماء</div>
+    `;
+  }
+
+  const canRoll = !state.rolling && (myRole === null || myRole === state.turn);
+  const turnLabel = myRole ? (state.turn === myRole ? 'دورك الآن' : 'دور صديقك') : `دور ${escapeHtml(state.playerNames[state.turn])}`;
+
+  return `
+  <div class="card">
+    <div class="track">
+      ${trackRow('p1', '🟡')}
+      ${trackRow('p2', '🔴')}
+    </div>
+    <div class="finish-flag">🏁 خط النهاية عند المربع ${FINISH}</div>
+    <div class="hint-banner ${state.turn==='p1'?'hint-higher':'hint-lower'}">${turnLabel}${state.rolling ? ' — جارٍ الرمي...' : ''}</div>
+    ${renderDie()}
+    <button class="btn-primary" onclick="rollDice()" ${canRoll?'':'disabled'}>${state.rolling ? 'جارٍ الرمي...' : 'ارمِ النرد 🎲'}</button>
+  </div>
+  <div class="small-link" onclick="backToSetup()">تعديل الأسماء / إعادة الضبط</div>
+  `;
+}
+
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = state.setupDone ? renderGame() : renderSetup();
+}
+
+window.startGame = startGame;
+window.rollDice = rollDice;
+window.newRace = newRace;
+window.backToSetup = backToSetup;
+
+MP.init({
+  getState: () => state,
+  setState: (incoming) => { state = incoming; render(); },
+  actions: { rollDice, newRace },
+  onStart: (mode, isHost, myName, peerName) => {
+    if(mode === 'local'){
+      render();
+    } else {
+      myRole = isHost ? 'p1' : 'p2';
+      if(isHost){ initGame(myName, peerName); MP.sync(); }
+      else { document.getElementById('app').innerHTML = '<div class="card"><div class="empty-state">جارٍ تجهيز اللعبة...</div></div>'; }
+    }
+  }
+});
+</script>
+</body>
+</html>
