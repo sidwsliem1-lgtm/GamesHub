@@ -17,6 +17,8 @@
   .lives{text-align:center;font-size:26px;letter-spacing:6px;margin-bottom:8px;}
   .pass-screen{text-align:center;padding:30px 10px;}
   .pass-screen .icon{font-size:52px;margin-bottom:10px;}
+  .waiting-screen{text-align:center;padding:30px 10px;color:var(--text-muted);}
+  .waiting-screen .icon{font-size:48px;margin-bottom:10px;}
 </style>
 </head>
 <body>
@@ -210,7 +212,24 @@ function renderRemoteWaitSetter(){
   `;
 }
 
+function renderWaitingForGuesser(){
+  return `
+  <div class="card">
+    <div class="waiting-screen">
+      <div class="icon">⏳</div>
+      <h2 style="justify-content:center;">بانتظار المخمّن</h2>
+      <p style="color:var(--text-muted);font-size:13.5px;">${escapeHtml(state.guesserName)} يحاول تخمين الكلمة...</p>
+      <p style="color:var(--text-muted);font-size:12px;">المحاولات المتبقية: ${state.livesLeft}</p>
+    </div>
+  </div>
+  `;
+}
+
 function renderGuessing(){
+  const isRemoteSetter = (myRole !== null && isSetter());
+  if (isRemoteSetter) {
+    return renderWaitingForGuesser();
+  }
   const normalized = normalizeArabic(state.secretWord);
   const canGuess = myRole === null || isGuesser();
   return `

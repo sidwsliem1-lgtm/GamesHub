@@ -184,6 +184,8 @@
   .tag-correct{background:rgba(122,155,110,.18);color:var(--success);}
 
   .empty-state{text-align:center;color:var(--text-muted);font-size:13.5px;padding:14px 0;}
+  .waiting-state{text-align:center;padding:20px 0;color:var(--text-muted);}
+  .waiting-state .icon{font-size:48px;margin-bottom:10px;}
 
   .finished-trophy{text-align:center;font-size:48px;margin-bottom:6px;}
   .finished-title{text-align:center;font-size:22px;font-weight:900;color:var(--brass-bright);margin-bottom:4px;}
@@ -267,14 +269,11 @@ function nameOf(role){
 // ====== دوال تبادل الأدوار ======
 function swapRoles(){
   if (!state.room) return;
-  // تبديل setterRole
   state.room.setterRole = state.room.setterRole === 'A' ? 'B' : 'A';
-  // إعادة ضبط الحالة للجولة التالية
   state.room.status = 'setting';
   state.room.secret = null;
   state.room.attemptsThisRound = 0;
   state.secretLocal = null;
-  // لا نغير currentRound هنا، بل نزيده عند بدء الجولة
   render();
   if (state.isHost) MP.sync();
 }
@@ -359,7 +358,6 @@ function localSubmitGuess(){
 }
 
 function localNextRound(){
-  // تبديل الأدوار
   swapRoles();
   state.room.currentRound += 1;
   state.room.guesses = [];
@@ -391,9 +389,7 @@ function remoteSubmitSecret(){
   render();
 }
 
-// دالة guess تُستخدم كإجراء (action) يتم استدعاؤها من قبل المضيف أو الضيف
 function guessAction(by, value){
-  // يتم تنفيذها من قبل المضيف (أو أي طرف يستقبل الإجراء)
   const room = state.room;
   if(room.status !== 'guessing' || state.busy) return;
   state.busy = true;
@@ -429,8 +425,6 @@ function remoteSubmitGuess(){
     render(); return;
   }
   state.error = '';
-  // إرسال إجراء guess مع role و value
-  // نستخدم MP.actions.guess إذا كانت معرفة
   if (MP.actions && MP.actions.guess) {
     MP.actions.guess(state.myRole, val);
   } else {
@@ -443,7 +437,6 @@ function remoteNextRound(){
   if(state.busy) return;
   state.busy = true;
   if(state.isHost){
-    // المضيف يبدل الأدوار ويزيد الجولة
     swapRoles();
     state.room.currentRound += 1;
     state.room.guesses = [];
@@ -451,10 +444,7 @@ function remoteNextRound(){
     MP.sync();
     render();
   } else {
-    // الضيف يطلب من المضيف تبديل الأدوار
     MP.requestSwapRoles();
-    // بعد استلام swap_roles، سينفذ المضيف التبديل ويرسل المزامنة
-    // وسيتم تحديث الحالة عبر setState
   }
 }
 
@@ -485,13 +475,25 @@ function renderSetup(){
   `;
 }
 
+function renderWaitingForGuesser(){
+  return `
+  <div class="card">
+    <div class="waiting-state">
+      <div class="icon">⏳</div>
+      <h2 style="justify-content:center;">بانتظار المخمّن</h2>
+      <p style="color:var(--text-muted);font-size:13.5px;">${escapeHtml(nameOf(state.room.setterRole === 'A' ? 'B' : 'A'))} يحاول تخمين الرقم...</p>
+      <p style="color:var(--text-muted);font-size:12px;">المحاولات حتى الآن: ${state.room.attemptsThisRound}</p>
+    </div>
+  </div>
+  `;
+}
+
 function renderGame(){
   const room = state.room;
   const guesserRole = room.setterRole === 'A' ? 'B' : 'A';
 
   let body = '';
   if(room.status === 'setting'){
-    // من هو المُعد؟
     const setterIsMe = (state.mode === 'local') ? true : (state.myRole === room.setterRole);
     if(setterIsMe){
       body = `
@@ -523,48 +525,52 @@ function renderGame(){
     </div>
     `;
   } else if(room.status === 'guessing' || room.status === 'round_end'){
-    const roundGuesses = room.guesses.filter(g => g.round === room.currentRound);
-    const lastGuess = roundGuesses[roundGuesses.length - 1];
-    let hintBanner = '';
-    if(room.status === 'round_end' && lastGuess){
-      const winnerName = nameOf(guesserRole);
-      hintBanner = `<div class="hint-banner hint-correct">🎉 ${escapeHtml(winnerName)} خمّن الرقم الصحيح (${room.secret}) خلال ${room.attemptsThisRound} محاولة!</div>`;
-    } else if(lastGuess){
-      if(lastGuess.hint === 'higher') hintBanner = `<div class="hint-banner hint-higher">⬆ الرقم السري أكبر من ${lastGuess.value}</div>`;
-      else if(lastGuess.hint === 'lower') hintBanner = `<div class="hint-banner hint-lower">⬇ الرقم السري أصغر من ${lastGuess.value}</div>`;
+    // في وضع البعيد، إذا كان اللاعب هو المُعدّ، نعرض شاشة انتظار
+    if (state.mode === 'remote' && state.myRole === room.setterRole && room.status === 'guessing') {
+      body = renderWaitingForGuesser();
     } else {
-      hintBanner = `<div class="hint-banner hint-wait">ابدأ التخمين!</div>`;
-    }
+      const roundGuesses = room.guesses.filter(g => g.round === room.currentRound);
+      const lastGuess = roundGuesses[roundGuesses.length - 1];
+      let hintBanner = '';
+      if(room.status === 'round_end' && lastGuess){
+        const winnerName = nameOf(guesserRole);
+        hintBanner = `<div class="hint-banner hint-correct">🎉 ${escapeHtml(winnerName)} خمّن الرقم الصحيح (${room.secret}) خلال ${room.attemptsThisRound} محاولة!</div>`;
+      } else if(lastGuess){
+        if(lastGuess.hint === 'higher') hintBanner = `<div class="hint-banner hint-higher">⬆ الرقم السري أكبر من ${lastGuess.value}</div>`;
+        else if(lastGuess.hint === 'lower') hintBanner = `<div class="hint-banner hint-lower">⬇ الرقم السري أصغر من ${lastGuess.value}</div>`;
+      } else {
+        hintBanner = `<div class="hint-banner hint-wait">ابدأ التخمين!</div>`;
+      }
 
-    // تحديد من المخمن
-    const guesserIsMe = (state.mode === 'local') ? true : (state.myRole === guesserRole);
-    body = `
-      <div class="card">
-        <div class="dial-wrap">${dialSVG(room)}</div>
-        ${hintBanner}
-        ${room.status === 'guessing' ? (guesserIsMe ? `
-          <input type="number" id="guessInput" placeholder="خمّن رقماً بين ${room.min} و ${room.max}" min="${room.min}" max="${room.max}" ${state.busy?'disabled':''}>
-          ${state.error ? `<div class="error-msg">${escapeHtml(state.error)}</div>` : ''}
-          <button class="btn-primary" onclick="${state.mode==='local'?'localSubmitGuess()':'remoteSubmitGuess()'}" ${state.busy?'disabled':''}>${state.busy ? 'جارٍ الإرسال...' : 'إرسال التخمين 🎯'}</button>
-        ` : `<div class="empty-state">بانتظار تخمين ${escapeHtml(nameOf(guesserRole))}...</div>`) : ''}
-        ${room.status === 'round_end' ? `
-          <button class="btn-primary" onclick="${state.mode==='local'?'localNextRound()':'remoteNextRound()'}" ${state.busy?'disabled':''}>${state.busy ? 'جارٍ التحميل...' : 'الجولة التالية ➡'}</button>
-        ` : ''}
-      </div>
-      <div class="card">
-        <h2>سجل المحاولات</h2>
-        <div class="history">
-          ${roundGuesses.length ? roundGuesses.map(g => `
-            <div class="history-row">
-              <span class="num digits">${g.value}</span>
-              <span class="tag ${g.hint==='correct'?'tag-correct':g.hint==='higher'?'tag-higher':'tag-lower'}">
-                ${g.hint==='correct' ? 'صحيح ✅' : g.hint==='higher' ? 'أكبر ⬆' : 'أصغر ⬇'}
-              </span>
-            </div>
-          `).reverse().join('') : `<div class="empty-state">لا توجد محاولات بعد</div>`}
+      const guesserIsMe = (state.mode === 'local') ? true : (state.myRole === guesserRole);
+      body = `
+        <div class="card">
+          <div class="dial-wrap">${dialSVG(room)}</div>
+          ${hintBanner}
+          ${room.status === 'guessing' ? (guesserIsMe ? `
+            <input type="number" id="guessInput" placeholder="خمّن رقماً بين ${room.min} و ${room.max}" min="${room.min}" max="${room.max}" ${state.busy?'disabled':''}>
+            ${state.error ? `<div class="error-msg">${escapeHtml(state.error)}</div>` : ''}
+            <button class="btn-primary" onclick="${state.mode==='local'?'localSubmitGuess()':'remoteSubmitGuess()'}" ${state.busy?'disabled':''}>${state.busy ? 'جارٍ الإرسال...' : 'إرسال التخمين 🎯'}</button>
+          ` : `<div class="empty-state">بانتظار تخمين ${escapeHtml(nameOf(guesserRole))}...</div>`) : ''}
+          ${room.status === 'round_end' ? `
+            <button class="btn-primary" onclick="${state.mode==='local'?'localNextRound()':'remoteNextRound()'}" ${state.busy?'disabled':''}>${state.busy ? 'جارٍ التحميل...' : 'الجولة التالية ➡'}</button>
+          ` : ''}
         </div>
-      </div>
-    `;
+        <div class="card">
+          <h2>سجل المحاولات</h2>
+          <div class="history">
+            ${roundGuesses.length ? roundGuesses.map(g => `
+              <div class="history-row">
+                <span class="num digits">${g.value}</span>
+                <span class="tag ${g.hint==='correct'?'tag-correct':g.hint==='higher'?'tag-higher':'tag-lower'}">
+                  ${g.hint==='correct' ? 'صحيح ✅' : g.hint==='higher' ? 'أكبر ⬆' : 'أصغر ⬇'}
+                </span>
+              </div>
+            `).reverse().join('') : `<div class="empty-state">لا توجد محاولات بعد</div>`}
+          </div>
+        </div>
+      `;
+    }
   }
 
   return `
@@ -680,7 +686,6 @@ function render(){
   app.innerHTML = html;
 }
 
-// ====== دوال الخروج ======
 function leaveGame(){
   state = {
     mode: null,
@@ -699,7 +704,6 @@ function leaveGame(){
   location.reload();
 }
 
-// ====== تهيئة اللعبة مع MP ======
 MP.init({
   getState: () => state,
   setState: (incoming) => {
@@ -721,7 +725,6 @@ MP.init({
     } else {
       state.myRole = isHost ? 'A' : 'B';
       if(isHost){
-        // المضيف يطلب الإعدادات
         const min = parseInt(prompt('الحد الأدنى', '1'));
         const max = parseInt(prompt('الحد الأعلى', '100'));
         const rounds = parseInt(prompt('عدد الجولات', '5'));
@@ -733,7 +736,6 @@ MP.init({
         }
         MP.sync();
       } else {
-        // الضيف ينتظر الحالة من المضيف
         state.screen = 'game';
         render();
       }
@@ -741,7 +743,6 @@ MP.init({
   }
 });
 
-// ربط الدوال العامة
 window.localStartGame = localStartGame;
 window.localSubmitSecret = localSubmitSecret;
 window.localProceedToGuess = localProceedToGuess;
@@ -754,7 +755,6 @@ window.remoteNextRound = remoteNextRound;
 window.leaveGame = leaveGame;
 window.guessAction = guessAction;
 
-// بدء العرض
 render();
 </script>
 </body>
