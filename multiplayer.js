@@ -13,8 +13,8 @@ const MP = (function() {
     let peerName = '';
     let connected = false;
     let reconnectAttempts = 0;
-    let pingInterval = null;
-    let reconnectTimeout = null;
+    let maxReconnectAttempts = 10; // زيادة عدد المحاولات
+    let reconnectTimer = null;
     let intentionalClose = false;
 
     function connectWebSocket() {
@@ -24,7 +24,7 @@ const MP = (function() {
                 return;
             }
             if (ws && ws.readyState === WebSocket.CONNECTING) {
-                // في انتظار الاتصال
+                // في حالة الاتصال جارٍ، ننتظر
                 ws.onopen = () => resolve();
                 ws.onerror = (err) => reject(err);
                 return;
@@ -34,28 +34,25 @@ const MP = (function() {
             ws.onopen = () => {
                 connected = true;
                 reconnectAttempts = 0;
-                startPing();
                 resolve();
             };
             ws.onerror = (err) => {
-                if (!intentionalClose) {
-                    reject(err);
-                }
+                reject(err);
             };
-            ws.onclose = (event) => {
+            ws.onclose = () => {
                 connected = false;
-                stopPing();
                 if (!intentionalClose) {
-                    // محاولة إعادة الاتصال
-                    if (reconnectAttempts < 5) {
+                    // محاولة إعادة الاتصال التلقائي
+                    if (reconnectAttempts < maxReconnectAttempts) {
                         reconnectAttempts++;
-                        const delay = Math.min(2000 * reconnectAttempts, 10000);
-                        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-                        reconnectTimeout = setTimeout(() => {
+                        const delay = Math.min(1000 * reconnectAttempts, 10000);
+                        console.log(`محاولة إعادة الاتصال ${reconnectAttempts} بعد ${delay}ms`);
+                        clearTimeout(reconnectTimer);
+                        reconnectTimer = setTimeout(() => {
                             connectWebSocket().catch(() => {});
                         }, delay);
                     } else {
-                        alert('انقطع الاتصال بالخادم، حاول تحديث الصفحة.');
+                        alert('انقطع الاتصال بالخادم بعد عدة محاولات. حاول تحديث الصفحة.');
                     }
                 }
             };
@@ -70,32 +67,20 @@ const MP = (function() {
         });
     }
 
-    function startPing() {
-        stopPing();
-        pingInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 10000);
-    }
-
-    function stopPing() {
-        if (pingInterval) {
-            clearInterval(pingInterval);
-            pingInterval = null;
-        }
-    }
-
     function send(msg) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
         } else {
-            console.warn('WebSocket غير متصل، لا يمكن الإرسال');
+            console.warn('WebSocket غير متصل، محاولة إعادة الاتصال...');
+            connectWebSocket().then(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify(msg));
+                }
+            }).catch(() => {});
         }
     }
 
     function handleMessage(msg) {
-        if (msg.type === 'pong' || msg.type === 'ping') return; // تجاهل رسائل الصيانة
         switch (msg.type) {
             case 'room_created':
                 roomId = msg.roomId;
@@ -205,6 +190,14 @@ const MP = (function() {
 
     function setWsUrl(url) {
         WS_URL = url;
+        // إعادة الاتصال بالخادم الجديد
+        if (ws) {
+            intentionalClose = true;
+            ws.close();
+            ws = null;
+        }
+        connected = false;
+        reconnectAttempts = 0;
     }
 
     function init(config) {
@@ -364,27 +357,11 @@ const MP = (function() {
         document.head.appendChild(style);
     }
 
-    // ====== إضافة دالة لإغلاق الاتصال يدوياً ======
-    function disconnect() {
-        intentionalClose = true;
-        stopPing();
-        if (ws) {
-            ws.close();
-            ws = null;
-        }
-        connected = false;
-        if (reconnectTimeout) {
-            clearTimeout(reconnectTimeout);
-            reconnectTimeout = null;
-        }
-    }
-
     return {
         init,
         sync: syncState,
         setWsUrl,
         requestSwapRoles,
-        disconnect,
         get mode() { return mode; },
         get isHost() { return isHost; }
     };
