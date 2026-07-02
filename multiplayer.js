@@ -13,6 +13,9 @@ const MP = (function() {
     let peerName = '';
     let connected = false;
     let reconnectAttempts = 0;
+    let pingInterval = null;
+    let reconnectTimeout = null;
+    let intentionalClose = false;
 
     function connectWebSocket() {
         return new Promise((resolve, reject) => {
@@ -20,23 +23,40 @@ const MP = (function() {
                 resolve();
                 return;
             }
+            if (ws && ws.readyState === WebSocket.CONNECTING) {
+                // في انتظار الاتصال
+                ws.onopen = () => resolve();
+                ws.onerror = (err) => reject(err);
+                return;
+            }
+            intentionalClose = false;
             ws = new WebSocket(WS_URL);
             ws.onopen = () => {
                 connected = true;
+                reconnectAttempts = 0;
+                startPing();
                 resolve();
             };
             ws.onerror = (err) => {
-                reject(err);
+                if (!intentionalClose) {
+                    reject(err);
+                }
             };
-            ws.onclose = () => {
+            ws.onclose = (event) => {
                 connected = false;
-                if (reconnectAttempts < 3) {
-                    reconnectAttempts++;
-                    setTimeout(() => {
-                        connectWebSocket().catch(() => {});
-                    }, 2000);
-                } else {
-                    alert('انقطع الاتصال بالخادم، حاول تحديث الصفحة.');
+                stopPing();
+                if (!intentionalClose) {
+                    // محاولة إعادة الاتصال
+                    if (reconnectAttempts < 5) {
+                        reconnectAttempts++;
+                        const delay = Math.min(2000 * reconnectAttempts, 10000);
+                        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                        reconnectTimeout = setTimeout(() => {
+                            connectWebSocket().catch(() => {});
+                        }, delay);
+                    } else {
+                        alert('انقطع الاتصال بالخادم، حاول تحديث الصفحة.');
+                    }
                 }
             };
             ws.onmessage = (event) => {
@@ -50,15 +70,32 @@ const MP = (function() {
         });
     }
 
+    function startPing() {
+        stopPing();
+        pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 10000);
+    }
+
+    function stopPing() {
+        if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+        }
+    }
+
     function send(msg) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
         } else {
-            console.warn('WebSocket غير متصل');
+            console.warn('WebSocket غير متصل، لا يمكن الإرسال');
         }
     }
 
     function handleMessage(msg) {
+        if (msg.type === 'pong' || msg.type === 'ping') return; // تجاهل رسائل الصيانة
         switch (msg.type) {
             case 'room_created':
                 roomId = msg.roomId;
@@ -327,11 +364,27 @@ const MP = (function() {
         document.head.appendChild(style);
     }
 
+    // ====== إضافة دالة لإغلاق الاتصال يدوياً ======
+    function disconnect() {
+        intentionalClose = true;
+        stopPing();
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        connected = false;
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+    }
+
     return {
         init,
         sync: syncState,
         setWsUrl,
         requestSwapRoles,
+        disconnect,
         get mode() { return mode; },
         get isHost() { return isHost; }
     };
