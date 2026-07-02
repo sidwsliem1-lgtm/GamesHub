@@ -2,7 +2,7 @@
 // Multiplayer Engine using WebSocket (no PeerJS)
 // ============================================================
 const MP = (function() {
-    let WS_URL = 'wss://concern-electro-allen-nancy.trycloudflare.com'; // يمكن تغييره
+    let WS_URL = 'wss://concern-electro-allen-nancy.trycloudflare.com';
 
     let ws = null;
     let roomId = null;
@@ -13,9 +13,8 @@ const MP = (function() {
     let peerName = '';
     let connected = false;
     let reconnectAttempts = 0;
-    let maxReconnectAttempts = 10; // زيادة عدد المحاولات
     let reconnectTimer = null;
-    let intentionalClose = false;
+    let manualClose = false;
 
     function connectWebSocket() {
         return new Promise((resolve, reject) => {
@@ -24,12 +23,12 @@ const MP = (function() {
                 return;
             }
             if (ws && ws.readyState === WebSocket.CONNECTING) {
-                // في حالة الاتصال جارٍ، ننتظر
+                // انتظر حتى يفتح
                 ws.onopen = () => resolve();
-                ws.onerror = (err) => reject(err);
+                ws.onerror = (e) => reject(e);
                 return;
             }
-            intentionalClose = false;
+            manualClose = false;
             ws = new WebSocket(WS_URL);
             ws.onopen = () => {
                 connected = true;
@@ -41,19 +40,8 @@ const MP = (function() {
             };
             ws.onclose = () => {
                 connected = false;
-                if (!intentionalClose) {
-                    // محاولة إعادة الاتصال التلقائي
-                    if (reconnectAttempts < maxReconnectAttempts) {
-                        reconnectAttempts++;
-                        const delay = Math.min(1000 * reconnectAttempts, 10000);
-                        console.log(`محاولة إعادة الاتصال ${reconnectAttempts} بعد ${delay}ms`);
-                        clearTimeout(reconnectTimer);
-                        reconnectTimer = setTimeout(() => {
-                            connectWebSocket().catch(() => {});
-                        }, delay);
-                    } else {
-                        alert('انقطع الاتصال بالخادم بعد عدة محاولات. حاول تحديث الصفحة.');
-                    }
+                if (!manualClose) {
+                    attemptReconnect();
                 }
             };
             ws.onmessage = (event) => {
@@ -67,16 +55,30 @@ const MP = (function() {
         });
     }
 
+    function attemptReconnect() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (reconnectAttempts >= 5) {
+            alert('تعذر إعادة الاتصال بالخادم بعد عدة محاولات. الرجاء تحديث الصفحة.');
+            return;
+        }
+        reconnectAttempts++;
+        reconnectTimer = setTimeout(() => {
+            connectWebSocket().then(() => {
+                // إعادة الانضمام للغرفة إذا كنا في وضع بعيد
+                if (roomId && myName) {
+                    send({ type: 'join_room', roomId, playerName: myName });
+                }
+            }).catch(() => {
+                attemptReconnect();
+            });
+        }, 2000 * reconnectAttempts);
+    }
+
     function send(msg) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
         } else {
-            console.warn('WebSocket غير متصل، محاولة إعادة الاتصال...');
-            connectWebSocket().then(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify(msg));
-                }
-            }).catch(() => {});
+            console.warn('WebSocket غير متصل');
         }
     }
 
@@ -190,14 +192,6 @@ const MP = (function() {
 
     function setWsUrl(url) {
         WS_URL = url;
-        // إعادة الاتصال بالخادم الجديد
-        if (ws) {
-            intentionalClose = true;
-            ws.close();
-            ws = null;
-        }
-        connected = false;
-        reconnectAttempts = 0;
     }
 
     function init(config) {
@@ -208,7 +202,6 @@ const MP = (function() {
         showChoiceModal();
     }
 
-    // ====== واجهة اختيار اللعب ======
     function showChoiceModal() {
         injectStyles();
         const overlay = document.createElement('div');
