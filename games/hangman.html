@@ -32,7 +32,7 @@
   <div class="instructions">
     <strong>كيف تُلعب؟</strong>
     <ol>
-      <li>أحد اللاعبين (المُعِدّ) يكتب كلمة أو عبارة سرية. في اللعب عن بُعد لا يراها الطرف الآخر إطلاقاً، وفي اللعب المحلي يجب تمرير الجهاز دون النظر.</li>
+      <li>أحد اللاعبين (المُعِدّ) يكتب كلمة أو عبارة سرية. في اللعب عن بُعد لا يراها الطرف الآخر إطلاقاً.</li>
       <li>اللاعب المخمِّن يختار حروفاً واحداً تلو الآخر.</li>
       <li>كل حرف خاطئ يُنقص محاولة من أصل 6 محاولات.</li>
       <li>يفوز المخمِّن إن أكمل الكلمة قبل نفاد المحاولات، ويفوز المُعِدّ إن نفدت المحاولات أولاً. الأدوار تتبدل كل جولة.</li>
@@ -141,6 +141,7 @@ function swapRoles(){
   if (myRole !== null && MP.isHost) MP.sync();
 }
 
+// ===== دوال جديدة لإعادة اللعب دون إنشاء غرفة =====
 function playAgain(){
   if (myRole === null) {
     swapRoles();
@@ -161,6 +162,7 @@ function backToStart(){
     secretWord: '', guessedLetters: [], livesLeft: MAX_LIVES, result: null,
   };
   render();
+  if (myRole !== null && MP.isHost) MP.sync();
 }
 
 function renderSetupWord(){
@@ -227,7 +229,7 @@ function renderWaitingForGuesser(){
 
 function renderGuessing(){
   const isRemoteSetter = (myRole !== null && isSetter());
-  if (isRemoteSetter) {
+  if (isRemoteSetter && state.phase === 'guessing') {
     return renderWaitingForGuesser();
   }
   const normalized = normalizeArabic(state.secretWord);
